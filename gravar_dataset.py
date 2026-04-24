@@ -17,6 +17,9 @@ try:
         while True:
             if ser.in_waiting > 0:
                 linha = ser.readline().decode('utf-8', errors='ignore').strip()
+
+                print(f"DEBUG (O Pico disse): {linha}")
+                
                 if "|" in linha:
                     parts = [p.strip() for p in linha.split("|")]
                     if len(parts) == 3:
