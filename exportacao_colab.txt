@@ -1,0 +1,17 @@
+# Corre isto ANTES de treinar para ver o que está a acontecer
+import pandas as pd
+
+def diagnosticar_csv(caminho_csv, threshold=40, pausa=8):
+    df = pd.read_csv(caminho_csv)
+    df['vel'] = (df['x'].diff().abs() + df['y'].diff().abs()).fillna(0)
+    
+    print(f"\n--- {caminho_csv} ---")
+    print(f"Total de linhas: {len(df)}")
+    print(f"Velocidade média: {df['vel'].mean():.1f}")
+    print(f"Velocidade máxima: {df['vel'].max():.1f}")
+    print(f"Linhas com vel > {threshold}: {(df['vel'] > threshold).sum()}")
+
+diagnosticar_csv('dados_circulo.csv')
+diagnosticar_csv('dados_quadrado.csv')
+diagnosticar_csv('dados_triangulo.csv')
+diagnosticar_csv('dados_repouso.csv')

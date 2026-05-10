@@ -1,0 +1,101 @@
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+
+TAMANHO_FIXO  = 20
+THRESHOLD_MOV = 40
+PAUSA_MINIMA  = 8
+MIN_PONTOS    = 15
+
+def segmentar_gestos(caminho_csv, label_nome):
+    df = pd.read_csv(caminho_csv)
+    df['vel'] = (df['x'].diff().abs() + df['y'].diff().abs()).fillna(0)
+
+    gestos = []
+    em_gesto = False
+    inicio = 0
+    pausa = 0
+
+    for i in range(len(df)):
+        if not em_gesto:
+            if df['vel'].iloc[i] > THRESHOLD_MOV:
+                em_gesto = True
+                inicio = i
+                pausa = 0
+        else:
+            if df['vel'].iloc[i] < THRESHOLD_MOV:
+                pausa += 1
+                if pausa >= PAUSA_MINIMA:
+                    seg = df.iloc[inicio : i - PAUSA_MINIMA][['x','y','z']].values
+                    if len(seg) >= MIN_PONTOS:
+                        gestos.append(seg)
+                    em_gesto = False
+            else:
+                pausa = 0
+
+    print(f"{label_nome}: {len(gestos)} gestos completos detectados")
+
+    janelas = []
+    labels  = []
+    for gesto in gestos:
+        # Resample para TAMANHO_FIXO pontos (normaliza velocidade de desenho)
+        idx    = np.linspace(0, len(gesto) - 1, TAMANHO_FIXO).astype(int)
+        gesto_r = gesto[idx].astype(float)
+
+        # Preprocessing de posição — igual ao original que funcionava
+        ref_x, ref_y, ref_z = gesto_r[0]
+        features = []
+        for row in gesto_r:
+            features.append((row[0] - ref_x) / 500.0)
+            features.append((row[1] - ref_y) / 500.0)
+            features.append((row[2] - ref_z) / 500.0)
+
+        janelas.append(features)
+        labels.append(label_nome)
+
+    return janelas, labels
+
+j_circ, l_circ = segmentar_gestos('dados_circulo.csv',  'Circulo')
+j_quad, l_quad = segmentar_gestos('dados_quadrado.csv', 'Quadrado')
+j_tria, l_tria = segmentar_gestos('dados_triangulo.csv','Triangulo')
+j_repo, l_repo = segmentar_gestos('dados_repouso.csv',  'Repouso')
+
+X     = np.array(j_circ + j_quad + j_tria + j_repo)
+y_str = np.array(l_circ + l_quad + l_tria + l_repo)
+
+encoder = LabelEncoder()
+y = encoder.fit_transform(y_str)
+print("Ordem das classes:", encoder.classes_)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+model = tf.keras.Sequential([
+    layers.Input(shape=(60,)),
+    layers.Dense(24, activation='relu'),
+    layers.Dropout(0.2),
+    layers.Dense(12, activation='relu'),
+    layers.Dense(4, activation='softmax')
+])
+
+model.compile(optimizer='adam',
+              loss='sparse_categorical_crossentropy',
+              metrics=['accuracy'])
+
+model.fit(X_train, y_train, epochs=100, batch_size=8,
+          validation_data=(X_test, y_test))
+
+# Matriz de confusão
+from sklearn.metrics import confusion_matrix
+import seaborn as sns, matplotlib.pyplot as plt
+y_pred = np.argmax(model.predict(X_test), axis=1)
+cm = confusion_matrix(y_test, y_pred)
+sns.heatmap(cm, annot=True, fmt='d',
+            xticklabels=encoder.classes_,
+            yticklabels=encoder.classes_)
+plt.ylabel('Real'); plt.xlabel('Previsto')
+plt.show()
