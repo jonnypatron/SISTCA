@@ -1,69 +1,79 @@
 import machine
 import time
 import ustruct
-import gc         # Adiciona isto
+import gc
 
-gc.collect()      # Limpa a memória!
-import ai_puro    # Agora sim, carrega a IA com espaço livre
+gc.collect()
+import ai_puro
 
-# Configuração do Sensor
-i2c = machine.I2C(0, scl=machine.Pin(5), sda=machine.Pin(4))
-ADDR = 0x53
+# --- INÍCIO SEGURO (Espera 2s para não crashar) ---
+time.sleep(2)
 
+i2c_sensor = machine.I2C(0, scl=machine.Pin(5), sda=machine.Pin(4))
+ADDR_SENSOR = 0x53
+
+try: i2c_sensor.writeto_mem(ADDR_SENSOR, 0x2D, b'\x08')
+except OSError: pass
+
+# --- TENTA LIGAR O LCD ---
+lcd_ligado = False
 try:
-    i2c.writeto_mem(ADDR, 0x2D, b'\x08')
-except OSError:
-    pass
+    from machine_i2c_lcd import I2cLcd
+    i2c_lcd = machine.I2C(1, scl=machine.Pin(3), sda=machine.Pin(2), freq=400000)
+    try: lcd = I2cLcd(i2c_lcd, 0x27, 4, 20); lcd_ligado = True
+    except: lcd = I2cLcd(i2c_lcd, 0x3f, 4, 20); lcd_ligado = True
+except: pass
 
-# A ORDEM EXATA QUE SAIU NO COLAB
-LABELS = ["Circulo", "Quadrado", "Repouso", "Triangulo"]
-
-PONTOS_POR_JANELA = 30
-ATRASO_LEITURA = 0.05
+LABELS = ["Circulo", "Quadrado", "Repouso", "Triangulo"] # VERIFICA SE É A ORDEM DO COLAB
+PONTOS_POR_JANELA = 20 
 buffer = []
 
-print("Sistema Edge AI Iniciado! Aguardando gestos...")
+print("🚀 Sistema IA Ativo! Podes mover o sensor em qualquer posição.")
 
 while True:
     try:
-        # Lê o sensor
-        data = i2c.readfrom_mem(ADDR, 0x32, 6)
+        data = i2c_sensor.readfrom_mem(ADDR_SENSOR, 0x32, 6)
         x, y, z = ustruct.unpack('<hhh', data)
+        buffer.append([x, y, z]) # Guarda cru!
         
-        # Normalização matemática (exatamente igual à do Colab!)
-        nx = (x - (-500.0)) / (500.0 - (-500.0))
-        ny = (y - (-500.0)) / (500.0 - (-500.0))
-        nz = (z - (-500.0)) / (500.0 - (-500.0))
-        
-        # Adiciona à janela de tempo
-        buffer.append([nx, ny, nz])
-        
-        # Quando a janela encher com 20 leituras (1 segundo de movimento)
-        # Quando a janela encher com 20 leituras (1 segundo de movimento)
         if len(buffer) == PONTOS_POR_JANELA:
+            # 1. Filtro Anti-Ruído: Calcula a variação máxima
+            max_x = max([p[0] for p in buffer]); min_x = min([p[0] for p in buffer])
+            max_y = max([p[1] for p in buffer]); min_y = min([p[1] for p in buffer])
             
-            # Achata a lista para 60 valores
+            # Se a mão mal se mexeu, é Repouso, limpa e salta!
+            if (max_x - min_x) < 40 and (max_y - min_y) < 40:
+                print("--- Repouso ---")
+                buffer = buffer[10:]
+                time.sleep(0.05)
+                continue
+
+            # 2. A MÁGICA: Subtrair o primeiro ponto (Referência)
+            ref_x, ref_y, ref_z = buffer[0]
+            
             inputs = []
-            for ponto in buffer:
-                inputs.extend(ponto)
+            for bx, by, bz in buffer:
+                inputs.append((bx - ref_x) / 500.0)
+                inputs.append((by - ref_y) / 500.0)
+                inputs.append((bz - ref_z) / 500.0)
                 
-            # A Inteligência Artificial faz a previsão!
             probabilidades = ai_puro.predict(inputs)
             classe_id = probabilidades.index(max(probabilidades))
             certeza = max(probabilidades) * 100
             
-            # ---> O NOSSO RAIO-X (IMPRIME TUDO O QUE A IA PENSA) <---
-            print(f"[DEBUG] Lendo: {LABELS[classe_id]} com {certeza:.1f}% de certeza")
+            if certeza > 75.0 and LABELS[classe_id] != "Repouso":
+                msg = f"{LABELS[classe_id]} ({certeza:.0f}%)"
+                print(f"⭐ RECONHECIDO: {msg} ⭐")
+                
+                if lcd_ligado:
+                    lcd.clear()
+                    lcd.putstr(" GESTO: ")
+                    lcd.move_to(0, 1)
+                    lcd.putstr(f"> {LABELS[classe_id]}")
             
-            # Só imprime o gesto final se tiver > 80% e NÃO for ruído
-            if certeza > 60.0 and LABELS[classe_id] != "Repouso":
-                print(f"🏆 GESTO RECONHECIDO: {LABELS[classe_id]} ({certeza:.1f}%) 🏆")
-            
-            # Desliza a janela
-            buffer = buffer[5:]
+            buffer = buffer[10:] # Salta 10 pontos
             
     except OSError:
-        # Se houver mau contacto no fio, ignora e tenta no próximo ciclo!
         pass
         
-    time.sleep(ATRASO_LEITURA)
+    time.sleep(0.05)

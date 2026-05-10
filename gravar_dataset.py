@@ -3,7 +3,7 @@ import csv
 
 # Configuração
 porta = 'COM3'
-label = "triangulo" # Muda para "quadrado" ou "repouso" conforme o que fores gravar
+label = "quadrado" # Muda para "quadrado" ou "repouso" conforme o que fores gravar
 arquivo_nome = f"dados_{label}.csv"
 
 ser = serial.Serial(porta, 115200, timeout=1)
